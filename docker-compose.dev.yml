@@ -1,0 +1,43 @@
+version: '3.9'
+
+# 本機開發覆蓋設定
+# 使用方式：docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# 功能：
+#   - 後端 / Worker 使用 volume mount（檔案修改即時反映）
+#   - 前端使用 Vite dev server（HMR 熱更新）
+#   - 暴露 PostgreSQL / Redis 到本機端口供直連
+
+services:
+  backend:
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/prisma:/app/prisma
+    environment:
+      NODE_ENV: development
+    command: ["sh", "-c", "npx prisma migrate deploy && node -r dotenv/config src/app.js"]
+
+  worker:
+    volumes:
+      - ./backend/src:/app/src
+    environment:
+      NODE_ENV: development
+
+  frontend:
+    build:
+      context: ./frontend
+      target: builder  # Only build stage, not nginx
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+    ports:
+      - "5173:5173"
+
+  postgres:
+    ports:
+      - "5432:5432"  # Expose for local DB tools
+
+  redis:
+    ports:
+      - "6379:6379"  # Expose for local Redis inspection

@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Enums ---
+enum Role        { 
+ADMIN 
+PARENT 
+TEACHER 
+UNBOUND 
+}
+enum EntryMode   { 
+MANUAL 
+AI_ASSISTED
+ }
+enum TaskStatus  { 
+PENDING 
+PROCESSING 
+REVIEW_
+NEEDED 
+COMPLETED 
+FAILED 
+}
+enum Mood        { 
+HAPPY 
+STABLE 
+ANGRY 
+CRYING 
+OTHER 
+}
+enum DietType    { 
+MILK 
+SOLID 
+}
+enum SleepQuality { 
+GOOD 
+NORMAL 
+POOR 
+}
+enum BowelQuality { 
+NORMAL 
+HARD 
+WATERY 
+OTHER 
+}
+
+// --- Models ---
+model User {
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  passwordHash       String
+  displayName        String?
+  role               Role      @default(UNBOUND)
+
+  resetToken         String?   @unique
+  resetTokenExpiry   DateTime?
+
+  // Implicit many-to-many
+  parentOf           Child[]   @relation("ChildParents")
+  teacherOf          Child[]   @relation("ChildTeachers")
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+model Child {
+  id                 String   @id @default(uuid())
+  name               String
+  birthDate          DateTime? @db.Date
+  gender             String?
+  notes              String?
+  avatarUrl          String?
+
+  parentBindingCode  String   @unique @default(cuid())
+  teacherBindingCode String   @unique @default(cuid())
+
+  // Implicit many-to-many (Prisma 自動建立中介表)
+  parents            User[]   @relation("ChildParents")
+  teachers           User[]   @relation("ChildTeachers")
+
+  records            DailyRecord[]
+  tasks              UploadTask[]
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model UploadTask {
+  id         String      @id @default(uuid())
+  childId    String
+  child      Child       @relation(fields: [childId], references: [id])
+  imageUrl   String
+  status     TaskStatus  @default(PENDING)
+  rawAiData  Json?
+  errorMsg   String?
+  retryCount Int         @default(0)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  record     DailyRecord?
+}
+
+model DailyRecord {
+  id              String      @id @default(uuid())
+  childId         String
+  child           Child       @relation(fields: [childId], references: [id])
+  recordDate      DateTime    @db.Date
+  dropOffTime     String?
+  pickUpTime      String?
+  mood            Mood?
+  homeBowel       Boolean     @default(false)
+  homeEatingNotes String?
+  notesTeacher    String?
+  notesParent     String?
+  entryMode       EntryMode
+  taskId          String?     @unique
+  task            UploadTask? @relation(fields: [taskId], references: [id])
+
+  diets           DietRecord[]
+  sleeps          SleepRecord[]
+  bowels          BowelRecord[]
+  healths         HealthRecord[]
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@unique([childId, recordDate])
+  @@index([childId, recordDate])
+}
+
+model DietRecord {
+  id       String      @id @default(uuid())
+  recordId String
+  record   DailyRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  time     String
+  type     DietType
+  volumeCc Int?
+  items    String?
+}
+
+model SleepRecord {
+  id        String       @id @default(uuid())
+  recordId  String
+  record    DailyRecord  @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  startTime String
+  endTime   String?
+  quality   SleepQuality?
+}
+
+model BowelRecord {
+  id       String       @id @default(uuid())
+  recordId String
+  record   DailyRecord  @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  time     String
+  quality  BowelQuality
+}
+
+model HealthRecord {
+  id          String      @id @default(uuid())
+  recordId    String
+  record      DailyRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  time        String
+  temperature Float?
+  symptoms    String[]
+}
