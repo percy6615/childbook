@@ -7,7 +7,6 @@ import queryClient from './queryClient'   // ← 使用 singleton
 import App from './App'
 import './index.css'
 
-
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

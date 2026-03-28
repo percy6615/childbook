@@ -101,7 +101,46 @@ router.patch('/profile', authenticate, [
   } catch (err) { next(err) }
 })
 
-// ─── POST /api/v1/auth/forgot-password ───────────────────────────────────────
+// ─── PUT /api/v1/auth/change-password ────────────────────────────────────────
+// v2.2.1：已登入使用者修改密碼（需驗證舊密碼）
+router.put('/change-password', authenticate, [
+  body('oldPassword').notEmpty().withMessage('請輸入目前密碼'),
+  body('newPassword').isLength({ min: 6 }).withMessage('新密碼至少 6 字元')
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req)
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
+
+    const { oldPassword, newPassword } = req.body
+
+    // 取得含 passwordHash 的完整使用者
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, passwordHash: true }
+    })
+
+    // 驗證舊密碼
+    const isMatch = await bcrypt.compare(oldPassword, user.passwordHash)
+    if (!isMatch) {
+      return res.status(400).json({ error: '目前密碼不正確' })
+    }
+
+    // 舊新密碼不能相同
+    if (oldPassword === newPassword) {
+      return res.status(400).json({ error: '新密碼不可與目前密碼相同' })
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 12)
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { passwordHash: newHash }
+    })
+
+    res.json({ message: '密碼修改成功，請重新登入以確認' })
+  } catch (err) { next(err) }
+})
+
+
 router.post('/forgot-password', [
   body('email').isEmail().normalizeEmail().withMessage('請輸入有效 Email')
 ], async (req, res, next) => {

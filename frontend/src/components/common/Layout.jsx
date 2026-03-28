@@ -2,7 +2,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import {
   LayoutDashboard, BookOpen, Upload, BarChart3,
-  User, LogOut, Menu, X, Baby, KeyRound
+  User, LogOut, Menu, X, Baby, KeyRound, Lock
 } from 'lucide-react'
 import { useAuthStore, useChildStore } from '../../store'
 import ChildSelector from './ChildSelector'
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/analytics',         icon: BarChart3,       label: '成長分析' },
   { to: '/settings/children', icon: Baby,            label: '幼童管理' },
   { to: '/profile',           icon: User,            label: '個人設定' },
+  { to: '/settings/password', icon: Lock,            label: '修改密碼' },
 ]
 
 const ROLE_LABEL = { ADMIN: '管理員', PARENT: '家長', TEACHER: '教師', UNBOUND: '未綁定' }

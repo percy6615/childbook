@@ -6,6 +6,7 @@ import RegisterPage from './pages/RegisterPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import BindPage from './pages/BindPage'
+import ChangePasswordPage from './pages/ChangePasswordPage'
 import DashboardPage from './pages/DashboardPage'
 import ChildrenPage from './pages/ChildrenPage'
 import RecordsPage from './pages/RecordsPage'
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="upload"            element={<UploadPage />} />
         <Route path="analytics"         element={<AnalyticsPage />} />
         <Route path="settings/children" element={<ChildrenPage />} />
+        <Route path="settings/password" element={<ChangePasswordPage />} />
         <Route path="profile"           element={<ProfilePage />} />
       </Route>
 

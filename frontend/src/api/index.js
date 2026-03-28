@@ -31,6 +31,7 @@ export const authApi = {
   register:       (data) => api.post('/auth/register', data),
   me:             ()     => api.get('/auth/me'),
   updateProfile:  (data) => api.patch('/auth/profile', data),
+  changePassword: (data) => api.put('/auth/change-password', data),
   forgotPassword: (data) => api.post('/auth/forgot-password', data),
   resetPassword:  (data) => api.post('/auth/reset-password', data),
 }
