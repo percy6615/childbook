@@ -1,0 +1,148 @@
+幼兒家庭聯絡簿數位化與分析系統 - 系統設計規格書 (SD) v2.11. 專案概述 (Project Overview)本系統旨在將實體幼兒家庭聯絡簿全面數位化，協助精準掌握幼童的日常作息與成長變化。透過「OCR + 多模態 AI (GPT-4V)」的混合式影像辨識技術，將手寫與勾選表單自動轉換為結構化數據，同時保留彈性的人工手動填寫機制。系統提供歷史紀錄的永久儲存與檢索，更具備三層次的數據分析與預警功能，透過視覺化圖表與首頁警示，協助照護者提早發現潛在的健康或情緒變化。2. 系統技術堆疊 (Technology Stack)前端 (Frontend): React.js (建議 Next.js / Vite)、Zustand (狀態管理)、Tailwind CSS + MUI、Recharts (圖表)、React Query (處理非同步狀態與 Polling)。後端 (Backend): Node.js (Express.js / NestJS)、Prisma ORM、BullMQ + Redis (非同步任務佇列)、Multer (檔案上傳)。資料庫 (Database): PostgreSQL。AI 與第三方服務: OpenAI API (GPT-4V / GPT-4o) 用於影像解析。3. 系統架構與作業流程 (Architecture & Processing Flow)為確保資料登錄的彈性與系統效能，系統提供「雙軌資料輸入模式」，並針對影像辨識導入非同步處理架構。3.1 雙軌資料建檔模式模式一：人工手動填寫 (Manual Data Entry)使用者直接開啟數位表單介面輸入當日數據。提交後即時寫入 PostgreSQL，無須等待 AI 解析，標記 entryMode 為 MANUAL。模式二：非同步 AI 影像辨識 (Asynchronous AI Recognition)任務提交: 前端上傳照片，後端建立 UploadTask 並回傳 Task ID，不阻塞前端。背景處理: 後端 Worker 呼叫 GPT-4V 解析表單。完成通知與覆核: 前端透過 Polling 獲取完成狀態，跳出「左側原圖／右側預填表單」雙視窗供人工確認。確認後寫入資料庫，標記 entryMode 為 AI_ASSISTED。3.2 非同步任務 (Queue) 生命週期與例外處理機制PG 在實作 BullMQ 時，需嚴格遵守以下 Task 生命週期與重試策略 (Retry Policy)：PENDING (等待中): 圖片上傳成功，等待 Worker 領取。PROCESSING (處理中): Worker 執行中。若遇 GPT-4V API 網路逾時 (502/504)，觸發自動重試 (設定 attempts: 3, backoff: exponential)。REVIEW_NEEDED (待覆核): 解析成功，等待前端使用者人工確認。COMPLETED (已完成): 使用者確認無誤並送出，正式寫入 DailyRecord。FAILED (失敗): 若圖片無法辨識 (非表單/模糊)，不進行重試，直接標記為 FAILED。前端停止 Polling，提示使用者直接點擊進入「模式一」手動填寫（並自動帶入剛上傳的圖片供參考）。4. 資料庫實體模型設計 (Physical Data Model - Prisma)以下為 PostgreSQL 的 Prisma Schema 定義，PG 可直接使用此結構進行 prisma migrate。程式碼片段generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Enums ---
+enum Role { ADMIN, PARENT, TEACHER }
+enum EntryMode { MANUAL, AI_ASSISTED }
+enum TaskStatus { PENDING, PROCESSING, REVIEW_NEEDED, COMPLETED, FAILED }
+enum Mood { HAPPY, STABLE, ANGRY, CRYING, OTHER }
+enum DietType { MILK, SOLID }
+enum SleepQuality { GOOD, NORMAL, POOR }
+enum BowelQuality { NORMAL, HARD, WATERY, OTHER }
+
+// --- Models ---
+model User {
+  id             String   @id @default(uuid())
+  username       String   @unique
+  passwordHash   String
+  role           Role     @default(PARENT)
+  children       Child[]  @relation("ParentChildren")
+  taughtChildren Child[]  @relation("TeacherChildren")
+  createdAt      DateTime @default(now())
+}
+
+model Child {
+  id          String         @id @default(uuid())
+  name        String
+  parentId    String
+  teacherId   String?
+  parent      User           @relation("ParentChildren", fields: [parentId], references: [id])
+  teacher     User?          @relation("TeacherChildren", fields: [teacherId], references: [id])
+  records     DailyRecord[]
+  tasks       UploadTask[]
+  createdAt   DateTime       @default(now())
+  @@index([parentId])
+}
+
+model UploadTask {
+  id         String       @id @default(uuid())
+  childId    String
+  child      Child        @relation(fields: [childId], references: [id])
+  imageUrl   String
+  status     TaskStatus   @default(PENDING)
+  rawAiData  Json?        // 儲存 GPT-4V 回傳的原始 JSON
+  errorMsg   String?      // 記錄辨識失敗原因
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  record     DailyRecord? 
+}
+
+model DailyRecord {
+  id              String      @id @default(uuid())
+  childId         String
+  child           Child       @relation(fields: [childId], references: [id])
+  recordDate      DateTime    @db.Date
+  dropOffTime     String?     // "HH:mm"
+  pickUpTime      String?     // "HH:mm"
+  mood            Mood?
+  homeBowel       Boolean     @default(false)
+  homeEatingNotes String?
+  notesTeacher    String?
+  notesParent     String?
+  entryMode       EntryMode
+  taskId          String?     @unique
+  task            UploadTask? @relation(fields: [taskId], references: [id])
+  
+  diets           DietRecord[]
+  sleeps          SleepRecord[]
+  bowels          BowelRecord[]
+  healths         HealthRecord[]
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  @@index([childId, recordDate]) // 加速時間序列查詢
+}
+
+model DietRecord {
+  id         String      @id @default(uuid())
+  recordId   String
+  record     DailyRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  time       String      // "HH:mm"
+  type       DietType
+  volumeCc   Int?        
+  items      String?     
+}
+
+model SleepRecord {
+  id         String       @id @default(uuid())
+  recordId   String
+  record     DailyRecord  @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  startTime  String       // "HH:mm"
+  endTime    String?      // "HH:mm"
+  quality    SleepQuality?
+}
+
+model BowelRecord {
+  id         String       @id @default(uuid())
+  recordId   String
+  record     DailyRecord  @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  time       String       // "HH:mm"
+  quality    BowelQuality
+}
+
+model HealthRecord {
+  id          String      @id @default(uuid())
+  recordId    String
+  record      DailyRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  time        String      // "HH:mm"
+  temperature Float?
+  symptoms    String[]    
+}
+5. 核心 API 規格合約 (API Contracts)前後端資料交換應嚴格遵守以下 JSON 格式。5.1 手動新增紀錄 (Manual Entry)Endpoint: POST /api/v1/recordsRequest Body:JSON{
+  "childId": "uuid-string",
+  "recordDate": "2026-03-25",
+  "dropOffTime": "07:30",
+  "pickUpTime": "16:50",
+  "mood": "HAPPY",
+  "homeBowel": true,
+  "homeEatingNotes": "早上吃了一半的吐司",
+  "notesTeacher": "今天有參與美勞活動",
+  "notesParent": "昨晚睡得不錯",
+  "diets": [
+    { "type": "MILK", "time": "10:00", "volumeCc": 150 },
+    { "type": "SOLID", "time": "12:00", "items": "豬肉、木耳" }
+  ],
+  "sleeps": [
+    { "startTime": "14:00", "endTime": "15:25", "quality": "GOOD" }
+  ],
+  "bowels": [
+    { "time": "13:15", "quality": "NORMAL" }
+  ],
+  "healths": [
+    { "time": "07:31", "temperature": 36.9, "symptoms": [] }
+  ]
+}
+Response (201 Created):JSON{ "message": "Record created successfully", "recordId": "uuid-string", "entryMode": "MANUAL" }
+5.2 AI 解析覆核確認送出 (AI Review Confirmation)Endpoint: POST /api/v1/records/confirmRequest Body: 與 5.1 相同，但必須包含 taskId。JSON{
+  "taskId": "task-uuid-string",
+  "childId": "uuid-string",
+  "recordDate": "2026-03-25",
+  "...": "(其餘欄位同 5.1)"
+}
+Response (201 Created): 後端需將資料寫入主表 (標記 entryMode: AI_ASSISTED)，並將對應 Task 狀態更新為 COMPLETED。6. 帳號權限與角色管理 (RBAC Matrix)角色 (Role)檢視權限 (Read)手動新增/修改 (Write)AI 上傳/覆核 (AI Flow)數據分析 (Analytics)Admin系統全域資料否 (僅管理帳號綁定)否否Parent僅限綁定之幼童資料是 (可新增、修改歷史)是 (具備完整使用權)是 (Level 1~3 全開)Teacher僅限授權班級/幼童是 (僅限當日/近期)是僅限 Level 1 (基本歷史)7. 數據分析與應用模組 (Data Analytics Module)系統將收集到的 PostgreSQL 關聯性資料，依據深度劃分為三個應用層次，需實作對應的 GET APIs：Level 1：基礎紀錄可視化 (GET /api/v1/analytics/:childId/basic)單一維度數據視覺化（總奶量趨勢、每日睡眠總時數、體溫波動紀錄）。Level 2：關聯分析 (GET /api/v1/analytics/:childId/correlation)交叉比對不同資料表（如：「副食品品項」與「排便型態/頻率」關聯；「特定時段奶量」與「睡眠品質」關聯）。Level 3：首頁預警系統 (GET /api/v1/analytics/:childId/alerts)於 Dashboard 顯示紅字警示（如：連續三天體溫 >= 37.5 觸發「注意觀察」；排便型態異常連續上升觸發「腸胃健康」）。

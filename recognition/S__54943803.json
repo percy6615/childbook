@@ -1,0 +1,156 @@
+{
+  "date": {
+    "year": "115",
+    "month": "7",
+    "day": "20",
+    "weekday": "五"
+  },
+  "transport": {
+    "drop_off_time": "09:28",
+    "pick_up_time": "16:50"
+  },
+  "home_situation": {
+    "bowel_movement": {
+      "has_movement": "無",
+      "frequency": "",
+      "consistency": ""
+    },
+    "diet": {
+      "time": "",
+      "ate": "",
+      "drank": ""
+    }
+  },
+  "feeding": {
+    "milk_sessions": [
+      {
+        "time": null,
+        "amount_cc": null
+      },
+      {
+        "time": null,
+        "amount_cc": null
+      },
+      {
+        "time": null,
+        "amount_cc": null
+      },
+      {
+        "time": null,
+        "amount_cc": null
+      }
+    ],
+    "snacks": [
+      {
+        "time": "11:55",
+        "items": "豬肉、木耳"
+      },
+      {
+        "time": "15:45",
+        "items": "食饅頭"
+      },
+      {
+        "time": null,
+        "items": null
+      }
+    ],
+    "food_types": []
+  },
+  "sleep": [
+    {
+      "start_time": "14:00",
+      "end_time": "15:25",
+      "quality": "安穩"
+    },
+    {
+      "start_time": null,
+      "end_time": null,
+      "quality": null
+    },
+    {
+      "start_time": null,
+      "end_time": null,
+      "quality": null
+    }
+  ],
+  "activities": [
+    "音樂/兒歌",
+    "生活常規"
+  ],
+  "bowel_movement_at_daycare": [
+    {
+      "has_movement": "有",
+      "time": "13:15",
+      "consistency": "正常",
+      "other": null
+    },
+    {
+      "has_movement": null,
+      "time": null,
+      "consistency": null,
+      "other": null
+    },
+    {
+      "has_movement": null,
+      "time": null,
+      "consistency": null,
+      "other": null
+    }
+  ],
+  "mood": [
+    "愉悅",
+    "穩定"
+  ],
+  "symptoms": [],
+  "temperature": [
+    {
+      "time": "09:20",
+      "value_celsius": "36.9"
+    },
+    {
+      "time": "16:20",
+      "value_celsius": "37.2"
+    },
+    {
+      "time": null,
+      "value_celsius": null
+    },
+    {
+      "time": null,
+      "value_celsius": null
+    }
+  ],
+  "medication": [
+    {
+      "time": null,
+      "oral_packets": null,
+      "oral_cc": null,
+      "external": null,
+      "completed": null
+    },
+    {
+      "time": null,
+      "oral_packets": null,
+      "oral_cc": null,
+      "external": null,
+      "completed": null
+    },
+    {
+      "time": null,
+      "oral_packets": null,
+      "oral_cc": null,
+      "external": null,
+      "completed": null
+    }
+  ],
+  "supplies": {
+    "diapers": "",
+    "formula": "",
+    "wet_wipes": "",
+    "other": ""
+  },
+  "teacher_note": "操作3月號教具",
+  "parent_feedback": "",
+  "caregiver_signature": "鄭耕現",
+  "parent_signature": ""
+}

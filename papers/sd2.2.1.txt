@@ -1,0 +1,294 @@
+幼兒家庭聯絡簿數位化與分析系統 - 系統設計規格書 (SD) v2.2.1
+1. 專案概述 (Project Overview)
+本系統旨在將實體幼兒家庭聯絡簿全面數位化，協助精準掌握幼童的日常作息與成長變化。透過「OCR + 多模態 AI (GPT-4V)」的混合式影像辨識技術，將手寫與勾選表單自動轉換為結構化數據，同時保留彈性的人工手動填寫機制。系統提供歷史紀錄的永久儲存與檢索，更具備三層次的數據分析與預警功能，透過視覺化圖表與首頁警示，協助照護者提早發現潛在的健康或情緒變化，並支援多機構/多位照護者共同管理的權限隔離架構。
+
+2. 系統技術堆疊 (Technology Stack)
+前端 (Frontend): React.js (建議 Next.js / Vite)、Zustand (狀態管理)、Tailwind CSS + MUI、Recharts (圖表)、React Query (處理非同步狀態與 Polling)。
+
+後端 (Backend): Node.js (Express.js / NestJS)、Prisma ORM、BullMQ + Redis (非同步任務佇列)、Multer (檔案上傳)、JWT (身分驗證)、Nodemailer (發送忘記密碼信件)。
+
+資料庫 (Database): PostgreSQL。
+
+AI 與第三方服務: OpenAI API (GPT-4V / GPT-4o) 用於影像解析。
+
+3. 帳號與權限管理模組 (IAM & Data Isolation)
+系統導入嚴謹的「多租戶與綁定碼機制」，確保資料絕對隔離。
+
+3.1 身分驗證與註冊 (Authentication)
+系統開放前台使用 Email 與密碼自行註冊。
+
+導入 JWT (JSON Web Token) 作為登入憑證。
+
+忘記密碼： 透過寄送附帶時效性 Token 的重置連結 (Reset Link) 至註冊 Email 進行密碼重設。
+
+修改密碼 (Change Password) [v2.2.1 新增]： 提供已登入之使用者主動變更密碼。為確保帳號安全性，修改流程必須先透過 API 驗證「舊密碼」正確無誤後，方可寫入並設定「新密碼」。
+
+3.2 角色定義與多對多綁定機制 (Role Binding)
+所有人註冊後預設皆為「未綁定狀態」，無法看到任何幼童資料。
+
+Admin (管理員): 於後台建立 Child (幼童基本檔案) 時，系統自動利用 UUID/CUID 生成兩組獨立欄位：parentBindingCode 與 teacherBindingCode。
+
+Parent (家長): 登入後輸入家長綁定碼，系統建立家長與該幼童的關聯。支援輸入多組不同幼童的綁定碼（管理多位兄弟姊妹）。具備該幼童最高權限（讀/寫/Level 3 預警分析）。
+
+Teacher (教師): 登入後輸入多位學生的教師綁定碼，建立照護清單，實現「多對多」的老師與學生雙向關聯。具備日常紀錄寫入與基本歷史讀取權限。
+
+4. 核心作業流程與異常處理
+4.1 雙軌資料建檔模式
+模式一：人工手動填寫 (Manual Data Entry)
+使用者直接開啟數位表單介面輸入當日數據。提交後即時寫入 PostgreSQL，無須等待 AI 解析，標記 entryMode 為 MANUAL。
+
+模式二：非同步 AI 影像辨識 (Asynchronous AI Recognition)
+
+任務提交: 前端上傳照片，後端建立 UploadTask 並回傳 Task ID，不阻塞前端。
+
+背景處理: 後端 Worker 呼叫 GPT-4V 解析表單。
+
+完成通知與覆核: 前端透過 Polling 獲取完成狀態，跳出「左側原圖／右側預填表單」雙視窗供人工確認。確認後寫入資料庫，標記 entryMode 為 AI_ASSISTED。
+
+4.2 非同步任務 (Queue) 生命週期與例外處理機制
+PG 在實作 BullMQ 時，需嚴格遵守以下 Task 生命週期與重試策略 (Retry Policy)：
+
+PENDING (等待中): 圖片上傳成功，等待 Worker 領取。
+
+PROCESSING (處理中): Worker 執行中。若遇 GPT-4V API 網路逾時 (502/504)，觸發自動重試 (設定 attempts: 3, backoff: exponential)。
+
+REVIEW_NEEDED (待覆核): 解析成功，等待前端使用者人工確認。
+
+COMPLETED (已完成): 使用者確認無誤並送出，正式寫入 DailyRecord。
+
+FAILED (失敗): 若圖片無法辨識 (非表單/模糊)，不進行重試，直接標記為 FAILED。前端停止 Polling，提示使用者直接點擊進入「模式一」手動填寫（並自動帶入剛上傳的圖片供參考）。
+
+5. 資料庫實體模型 (Prisma Schema)
+PG 請特別注意 User 與 Child 之間採用隱式多對多 (Implicit Many-to-Many) 關聯，並具備 Auth 相關防護欄位。
+
+程式碼片段
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Enums ---
+enum Role { ADMIN, PARENT, TEACHER, UNBOUND }
+enum EntryMode { MANUAL, AI_ASSISTED }
+enum TaskStatus { PENDING, PROCESSING, REVIEW_NEEDED, COMPLETED, FAILED }
+enum Mood { HAPPY, STABLE, ANGRY, CRYING, OTHER }
+enum DietType { MILK, SOLID }
+enum SleepQuality { GOOD, NORMAL, POOR }
+enum BowelQuality { NORMAL, HARD, WATERY, OTHER }
+
+// --- Models ---
+model User {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  passwordHash        String    // 儲存 Bcrypt Hash，供登入與修改密碼時比對
+  role                Role      @default(UNBOUND)
+  
+  resetToken          String?   @unique
+  resetTokenExpiry    DateTime?
+  
+  parentOf            Child[]   @relation("ChildParents")
+  teacherOf           Child[]   @relation("ChildTeachers")
+  
+  createdAt           DateTime  @default(now())
+}
+
+model Child {
+  id                  String    @id @default(uuid())
+  name                String
+  
+  parentBindingCode   String    @unique @default(cuid())
+  teacherBindingCode  String    @unique @default(cuid())
+  
+  parents             User[]    @relation("ChildParents")
+  teachers            User[]    @relation("ChildTeachers")
+  
+  records             DailyRecord[]
+  tasks               UploadTask[]
+  createdAt           DateTime  @default(now())
+}
+
+model DailyRecord {
+  id              String      @id @default(uuid())
+  childId         String
+  child           Child       @relation(fields: [childId], references: [id])
+  recordDate      DateTime    @db.Date
+  dropOffTime     String?     
+  pickUpTime      String?     // "HH:mm"
+  mood            Mood?
+  homeBowel       Boolean     @default(false)
+  homeEatingNotes String?
+  notesTeacher    String?
+  notesParent     String?
+  entryMode       EntryMode   
+  taskId          String?     @unique
+  task            UploadTask? @relation(fields: [taskId], references: [id])
+  
+  diets           DietRecord[]
+  sleeps          SleepRecord[]
+  bowels          BowelRecord[]
+  healths         HealthRecord[]
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  @@index([childId, recordDate])
+}
+
+model UploadTask {
+  id         String       @id @default(uuid())
+  childId    String
+  child      Child        @relation(fields: [childId], references: [id])
+  imageUrl   String
+  status     TaskStatus   @default(PENDING)
+  rawAiData  Json?        
+  errorMsg   String?      
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  record     DailyRecord? 
+}
+
+model DietRecord {
+  id         String      @id @default(uuid())
+  recordId   String
+  record     DailyRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  time       String      // "HH:mm"
+  type       DietType
+  volumeCc   Int?        
+  items      String?     
+}
+
+model SleepRecord {
+  id         String       @id @default(uuid())
+  recordId   String
+  record     DailyRecord  @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  startTime  String       // "HH:mm"
+  endTime    String?      // "HH:mm"
+  quality    SleepQuality?
+}
+
+model BowelRecord {
+  id         String       @id @default(uuid())
+  recordId   String
+  record     DailyRecord  @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  time       String       // "HH:mm"
+  quality    BowelQuality
+}
+
+model HealthRecord {
+  id          String      @id @default(uuid())
+  recordId    String
+  record      DailyRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  time        String      // "HH:mm"
+  temperature Float?
+  symptoms    String[]    
+}
+6. 核心 API 規格合約 (API Contracts)
+前後端資料交換應嚴格遵守以下 JSON 格式。
+
+6.1 身分驗證與密碼管理 (Auth & Password APIs)
+註冊: POST /api/v1/auth/register (Payload: { "email", "password", "role" })
+
+登入: POST /api/v1/auth/login (回傳 JWT Token)
+
+忘記密碼: POST /api/v1/auth/forgot-password (Payload: { "email" })
+
+重置密碼: POST /api/v1/auth/reset-password (Payload: { "token", "newPassword" })
+
+修改密碼 [v2.2.1 新增]: PUT /api/v1/auth/change-password
+
+Headers: 需攜帶有效的 Authorization: Bearer <JWT Token>。
+
+Payload: { "oldPassword": "xxx", "newPassword": "yyy" }
+
+後端邏輯: 需先比對 oldPassword 與資料庫中的 passwordHash，比對成功才允許將 newPassword 進行 Hash 處理並寫入資料庫。
+
+6.2 綁定幼童代碼 (Binding API)
+這支 API 是權限隔離的核心，負責處理代碼核對與關聯建立。
+
+Endpoint: POST /api/v1/children/bind
+
+Request Body: { "bindingCode": "cuid-string-generated-by-system" }
+
+後端邏輯提示 (PG 必看):
+
+接收到 bindingCode 後，查詢 Child 表。
+
+若比對中 parentBindingCode，則將當前登入使用者的 ID 推入該 Child 的 parents 關聯中。
+
+若比對中 teacherBindingCode，則將當前登入使用者的 ID 推入該 Child 的 teachers 關聯中。
+
+回傳 200 OK 及綁定成功之幼童基本資料。
+
+6.3 聯絡簿操作與分析 (Records APIs)
+注意: 所有讀取與寫入的 API Middleware (Guard) 必須檢查 JWT Token 中的 User ID 是否存在於該 childId 的 parents 或 teachers 陣列中，防止越權存取。
+
+A. 手動新增紀錄 (Manual Entry)
+
+Endpoint: POST /api/v1/records
+
+Request Body:
+
+JSON
+
+{
+  "childId": "uuid-string",
+  "recordDate": "2026-03-25",
+  "dropOffTime": "07:30",
+  "pickUpTime": "16:50",
+  "mood": "HAPPY",
+  "homeBowel": true,
+  "homeEatingNotes": "早上吃了一半的吐司",
+  "notesTeacher": "今天有參與美勞活動",
+  "notesParent": "昨晚睡得不錯",
+  "diets": [
+    { "type": "MILK", "time": "10:00", "volumeCc": 150 },
+    { "type": "SOLID", "time": "12:00", "items": "豬肉、木耳" }
+  ],
+  "sleeps": [
+    { "startTime": "14:00", "endTime": "15:25", "quality": "GOOD" }
+  ],
+  "bowels": [
+    { "time": "13:15", "quality": "NORMAL" }
+  ],
+  "healths": [
+    { "time": "07:31", "temperature": 36.9, "symptoms": [] }
+  ]
+}
+Response:
+
+JSON
+
+{ "message": "Record created successfully", "recordId": "uuid-string", "entryMode": "MANUAL" }
+B. AI 解析覆核確認送出 (AI Review Confirmation)
+
+Endpoint: POST /api/v1/records/confirm
+
+Request Body: 與上述相同，但必須包含 taskId。
+
+後端邏輯提示: 需將資料寫入主表 (標記 entryMode: AI_ASSISTED)，並將對應 Task 狀態更新為 COMPLETED。
+
+7. 前端架構與元件設計 (Frontend Architecture)
+7.1 核心頁面路由 (Routing Structure)
+Auth 路由群 (不需登入): /login, /register, /forgot-password, /reset-password
+
+主應用路由群 (需登入 + 已綁定幼童):
+/dashboard (總覽首頁), /records (歷史紀錄), /records/new (手動新增), /records/review/:taskId (AI 雙視窗覆核), /analytics (關聯分析)。
+
+設定與帳號管理路由:
+/settings/bind (輸入綁定碼介面), /settings/children (切換/管理已綁定的多位幼童清單), /settings/password (修改密碼介面)。
+
+8. 數據分析與應用模組 (Data Analytics Module)
+系統將收集到的 PostgreSQL 關聯性資料，依據深度劃分為三個應用層次，需實作對應的 GET APIs：
+
+Level 1：基礎紀錄可視化 (GET /api/v1/analytics/:childId/basic)
+單一維度數據視覺化（總奶量趨勢、每日睡眠總時數、體溫波動紀錄）。
+
+Level 2：關聯分析 (GET /api/v1/analytics/:childId/correlation)
+交叉比對不同資料表（如：「副食品品項」與「排便型態/頻率」關聯；「特定時段奶量」與「睡眠品質」關聯）。
+
+Level 3：首頁預警系統 (GET /api/v1/analytics/:childId/alerts)
+於 Dashboard 顯示紅字警示（如：連續三天體溫 >= 37.5 觸發「注意觀察」；排便型態異常連續上升觸發「腸胃健康」）。
